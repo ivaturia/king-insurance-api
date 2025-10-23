@@ -1,0 +1,23 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "King Insurance Quotes",
+  "name_for_model": "king_insurance_quotes",
+  "description_for_human": "Get fast auto quotes, apply bundle discounts, retrieve saved quotes.",
+  "description_for_model": "Offer auto insurance quotes with optional homeowners bundle. Collect only needed fields, prefill when existing customer data matches. Retrieve quotes by ID.",
+  "auth": {
+    "type": "oauth",
+    "client_url": "https://king-insurance-api.ivaturi.workers.dev/oauth/authorize",
+    "authorization_url": "https://king-insurance-api.ivaturi.workers.dev/oauth/authorize",
+    "scope": "quotes:read quotes:write",
+    "authorization_content_type": "application/x-www-form-urlencoded",
+    "verification_tokens": { "openai": "replace-with-your-openai-verification-token" }
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://king-insurance-api.ivaturi.workers.dev/openapi.yaml",
+    "is_user_authenticated": true
+  },
+  "logo_url": "https://king-insurance-api.ivaturi.workers.dev/logo.png",
+  "contact_email": "support@kinginsurance.example",
+  "legal_info_url": "https://kinginsurance.example/legal"
+}

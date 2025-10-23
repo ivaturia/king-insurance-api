@@ -1,0 +1,282 @@
+openapi: 3.1.0
+info:
+  title: King Insurance API
+  version: 1.0.0
+  description: >
+    Auto & Bundle Quote API for King Insurance Company. OAuth-protected.
+    Demo pricing with static customers & quotes. Supports customer prefill
+    when only minimal identifying info is provided (e.g., email + zipcode).
+servers:
+  - url: https://king-insurance-api.ivaturi.workers.dev
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Person:
+      type: object
+      properties:
+        first_name: { type: string }
+        last_name: { type: string }
+        dob: { type: string, format: date }
+        email: { type: string, format: email }
+        phone: { type: string }
+        address1: { type: string }
+        address2: { type: string }
+        city: { type: string }
+        state: { type: string }
+        zipcode: { type: string }
+        prior_insurance: { type: boolean, description: "Continuous prior insurance indicator." }
+        lapse_days: { type: integer, default: 0, description: "Days without coverage if prior_insurance=false." }
+        home_owner: { type: boolean }
+    Driver:
+      type: object
+      required: [first_name, last_name, dob, years_licensed]
+      properties:
+        first_name: { type: string }
+        last_name: { type: string }
+        dob: { type: string, format: date }
+        license_state: { type: string }
+        years_licensed: { type: number }
+        accidents_last_5y: { type: integer }
+        violations_last_3y: { type: integer }
+    Vehicle:
+      type: object
+      required: [year, make, model, primary_use, garaging_zip]
+      properties:
+        vin: { type: string }
+        year: { type: integer }
+        make: { type: string }
+        model: { type: string }
+        ownership: { type: string, enum: [own, lease, finance] }
+        primary_use: { type: string, enum: [commute, pleasure, business] }
+        annual_miles: { type: integer }
+        garaging_zip: { type: string }
+    HomeBundle:
+      type: object
+      properties:
+        homeowners_selected: { type: boolean, description: "If true, applies Auto+Home bundle discount." }
+        home_details:
+          type: object
+          properties:
+            property_value: { type: integer }
+            year_built: { type: integer }
+            construction_type: { type: string }
+            security_system: { type: boolean }
+    QuoteRequest:
+      type: object
+      required: [person]
+      properties:
+        person:
+          $ref: "#/components/schemas/Person"
+        drivers:
+          type: array
+          description: "Optional. If omitted/empty and a customer match is found, drivers will be prefilled."
+          items: { $ref: "#/components/schemas/Driver" }
+        vehicles:
+          type: array
+          description: "Optional. If omitted/empty and a customer match is found, vehicles will be prefilled."
+          items: { $ref: "#/components/schemas/Vehicle" }
+        bundle:
+          $ref: "#/components/schemas/HomeBundle"
+    QuoteResponse:
+      type: object
+      properties:
+        quote_id: { type: string }
+        rated_person: { $ref: "#/components/schemas/Person" }
+        rated_drivers:
+          type: array
+          items: { $ref: "#/components/schemas/Driver" }
+        rated_vehicles:
+          type: array
+          items: { $ref: "#/components/schemas/Vehicle" }
+        discounts_applied:
+          type: array
+          items: { type: string }
+        premium_breakdown:
+          type: object
+          properties:
+            per_vehicle:
+              type: array
+              items:
+                type: object
+                properties:
+                  year: { type: integer }
+                  make: { type: string }
+                  model: { type: string }
+                  base: { type: number }
+                  surcharges: { type: number }
+                  discounts: { type: number }
+                  subtotal: { type: number }
+            policy_fee: { type: number }
+            state_surcharge: { type: number }
+            final_6mo: { type: number }
+            final_12mo: { type: number }
+        created_at: { type: string, format: date-time }
+        next_steps: { type: string }
+
+    Customer:
+      type: object
+      properties:
+        customer_id: { type: string }
+        person: { $ref: "#/components/schemas/Person" }
+        drivers:
+          type: array
+          items: { $ref: "#/components/schemas/Driver" }
+        vehicles:
+          type: array
+          items: { $ref: "#/components/schemas/Vehicle" }
+
+paths:
+  /oauth/token:
+    post:
+      tags: [Auth]
+      summary: OAuth2 token endpoint (demo)
+      operationId: oauthToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                grant_type: { type: string, enum: [client_credentials, authorization_code, refresh_token] }
+                client_id: { type: string }
+                client_secret: { type: string }
+                code: { type: string }
+                redirect_uri: { type: string, format: uri }
+                refresh_token: { type: string }
+              required: [grant_type, client_id, client_secret]
+      responses:
+        "200":
+          description: Access token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token_type: { type: string, example: Bearer }
+                  access_token: { type: string }
+                  expires_in: { type: integer }
+                  refresh_token: { type: string }
+        "400":
+          description: Invalid request
+
+  /quotes:
+    post:
+      tags: [Quotes]
+      summary: Create an auto (optionally bundled) quote
+      operationId: createQuote
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuoteRequest" }
+            examples:
+              prefillMinimal:
+                summary: Prefill using existing customer (minimal input)
+                value:
+                  person:
+                    email: "john@example.com"
+                    zipcode: "20871"
+                  drivers: []
+                  vehicles: []
+              fullNew:
+                summary: Full new quote (no prefill)
+                value:
+                  person:
+                    first_name: "Dev"
+                    last_name: "Tester"
+                    email: "dev@test.com"
+                    phone: "+1-301-555-0000"
+                    zipcode: "20871"
+                    prior_insurance: true
+                    lapse_days: 0
+                    home_owner: true
+                  drivers:
+                    - first_name: "Dev"
+                      last_name: "Tester"
+                      dob: "1982-03-01"
+                      license_state: "MD"
+                      years_licensed: 12
+                      accidents_last_5y: 0
+                      violations_last_3y: 0
+                  vehicles:
+                    - year: 2011
+                      make: "Toyota"
+                      model: "Camry"
+                      ownership: "own"
+                      primary_use: "commute"
+                      annual_miles: 12000
+                      garaging_zip: "20871"
+                  bundle:
+                    homeowners_selected: true
+                    home_details:
+                      property_value: 550000
+                      year_built: 2015
+                      security_system: true
+      responses:
+        "200":
+          description: Quote created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuoteResponse" }
+        "400":
+          description: Bad request (e.g., invalid JSON)
+        "401":
+          description: Unauthorized
+        "500":
+          description: Server error
+
+  /quotes/{quoteId}:
+    get:
+      tags: [Quotes]
+      summary: Retrieve an existing quote
+      operationId: getQuoteById
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: quoteId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Quote found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuoteResponse" }
+        "404":
+          description: Not found
+        "401":
+          description: Unauthorized
+
+  /customers/{customerId}:
+    get:
+      tags: [Customers]
+      summary: Get static customer profile (demo)
+      operationId: getCustomerById
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Customer found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "404":
+          description: Not found
+        "401":
+          description: Unauthorized

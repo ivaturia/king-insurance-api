@@ -4,8 +4,8 @@ info:
   version: 1.0.0
   description: >
     Auto & Bundle Quote API for King Insurance Company. OAuth-protected.
-    Demo pricing with static customers & quotes. Supports customer prefill
-    when only minimal identifying info is provided (e.g., email + zipcode).
+    Demo pricing with static customers & quotes. Supports customer prefill.
+
 servers:
   - url: https://king-insurance-api.ivaturi.workers.dev
 
@@ -30,9 +30,10 @@ components:
         city: { type: string }
         state: { type: string }
         zipcode: { type: string }
-        prior_insurance: { type: boolean, description: "Continuous prior insurance indicator." }
-        lapse_days: { type: integer, default: 0, description: "Days without coverage if prior_insurance=false." }
+        prior_insurance: { type: boolean }
+        lapse_days: { type: integer, default: 0 }
         home_owner: { type: boolean }
+
     Driver:
       type: object
       required: [first_name, last_name, dob, years_licensed]
@@ -44,6 +45,7 @@ components:
         years_licensed: { type: number }
         accidents_last_5y: { type: integer }
         violations_last_3y: { type: integer }
+
     Vehicle:
       type: object
       required: [year, make, model, primary_use, garaging_zip]
@@ -56,10 +58,11 @@ components:
         primary_use: { type: string, enum: [commute, pleasure, business] }
         annual_miles: { type: integer }
         garaging_zip: { type: string }
+
     HomeBundle:
       type: object
       properties:
-        homeowners_selected: { type: boolean, description: "If true, applies Auto+Home bundle discount." }
+        homeowners_selected: { type: boolean }
         home_details:
           type: object
           properties:
@@ -67,26 +70,38 @@ components:
             year_built: { type: integer }
             construction_type: { type: string }
             security_system: { type: boolean }
+
+    PrefillStatus:
+      type: object
+      properties:
+        matched: { type: boolean, description: "True if an existing customer record was used to prefill." }
+        basis:
+          type: string
+          enum: [email+zip, phone+zip, email, phone, name+zip, none]
+        customer_id:
+          type: [string, "null"]
+          description: "Customer id when matched; null otherwise."
+
     QuoteRequest:
       type: object
       required: [person]
       properties:
-        person:
-          $ref: "#/components/schemas/Person"
+        person: { $ref: "#/components/schemas/Person" }
         drivers:
           type: array
-          description: "Optional. If omitted/empty and a customer match is found, drivers will be prefilled."
           items: { $ref: "#/components/schemas/Driver" }
+          description: "Optional. Prefilled if match is found and omitted."
         vehicles:
           type: array
-          description: "Optional. If omitted/empty and a customer match is found, vehicles will be prefilled."
           items: { $ref: "#/components/schemas/Vehicle" }
-        bundle:
-          $ref: "#/components/schemas/HomeBundle"
+          description: "Optional. Prefilled if match is found and omitted."
+        bundle: { $ref: "#/components/schemas/HomeBundle" }
+
     QuoteResponse:
       type: object
       properties:
         quote_id: { type: string }
+        prefill: { $ref: "#/components/schemas/PrefillStatus" }
         rated_person: { $ref: "#/components/schemas/Person" }
         rated_drivers:
           type: array
@@ -172,8 +187,7 @@ paths:
       tags: [Quotes]
       summary: Create an auto (optionally bundled) quote
       operationId: createQuote
-      security:
-        - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
@@ -218,10 +232,6 @@ paths:
                       garaging_zip: "20871"
                   bundle:
                     homeowners_selected: true
-                    home_details:
-                      property_value: 550000
-                      year_built: 2015
-                      security_system: true
       responses:
         "200":
           description: Quote created
@@ -229,19 +239,18 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/QuoteResponse" }
         "400":
-          description: Bad request (e.g., invalid JSON)
-        "401":
-          description: Unauthorized
-        "500":
-          description: Server error
+          description: >
+            Bad request. For example: invalid JSON or insufficient data
+            (no vehicles provided and no matching customer with saved vehicles).
+        "401": { description: Unauthorized }
+        "500": { description: Server error }
 
   /quotes/{quoteId}:
     get:
       tags: [Quotes]
       summary: Retrieve an existing quote
       operationId: getQuoteById
-      security:
-        - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
         - name: quoteId
           in: path
@@ -253,18 +262,15 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/QuoteResponse" }
-        "404":
-          description: Not found
-        "401":
-          description: Unauthorized
+        "404": { description: Not found }
+        "401": { description: Unauthorized }
 
   /customers/{customerId}:
     get:
       tags: [Customers]
       summary: Get static customer profile (demo)
       operationId: getCustomerById
-      security:
-        - bearerAuth: []
+      security: [{ bearerAuth: [] }]
       parameters:
         - name: customerId
           in: path
@@ -275,8 +281,7 @@ paths:
           description: Customer found
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Customer" }
-        "404":
-          description: Not found
-        "401":
-          description: Unauthorized
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "404": { description: Not found }
+        "401": { description: Unauthorized }

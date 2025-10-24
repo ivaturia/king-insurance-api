@@ -32,63 +32,54 @@ async function verifyToken(secret: string, token: string) {
 app.get('/health', (c) => c.text('OK'));
 
 // ---------- Matching helpers ----------
-function normalizeEmail(s?: string) {
-  return (s || '').trim().toLowerCase();
-}
-function normalizePhone(s?: string) {
-  return (s || '').replace(/\D/g, ''); // digits only
-}
-function normalizeZip(s?: string) {
-  return (s || '').trim().slice(0, 5);
-}
-function normalizeName(s?: string) {
-  return (s || '').trim().toLowerCase();
-}
+function normalizeEmail(s?: string) { return (s || '').trim().toLowerCase(); }
+function normalizePhone(s?: string) { return (s || '').replace(/\D/g, ''); }
+function normalizeZip(s?: string)   { return (s || '').trim().slice(0, 5); }
+function normalizeName(s?: string)  { return (s || '').trim().toLowerCase(); }
 
-/**
- * Find a customer by:
- * 1) (email OR phone) + zip (strong)
- * 2) email-only OR phone-only
- * 3) first+last+zip
- */
-function findCustomer(p: any) {
+/** Return { hit, basis } where basis explains how the match was made. */
+function findCustomerWithBasis(p: any): { hit: any | null, basis: 'email+zip' | 'phone+zip' | 'email' | 'phone' | 'name+zip' | 'none' } {
   const email = normalizeEmail(p?.email);
   const phone = normalizePhone(p?.phone);
-  const zip = normalizeZip(p?.zipcode);
+  const zip   = normalizeZip(p?.zipcode);
   const first = normalizeName(p?.first_name);
-  const last = normalizeName(p?.last_name);
+  const last  = normalizeName(p?.last_name);
 
-  // 1) Strong match: (email OR phone) + zip
+  // 1) (email OR phone) + zip
   let hit = customers.find((x) => {
     const xEmail = normalizeEmail(x.person.email);
     const xPhone = normalizePhone(x.person.phone);
-    const xZip = normalizeZip(x.person.zipcode);
-    const emailMatch = email && xEmail && xEmail === email;
-    const phoneMatch = phone && xPhone && xPhone === phone;
-    const zipMatch = zip && xZip && xZip === zip;
+    const xZip   = normalizeZip(x.person.zipcode);
+    const emailMatch = !!email && xEmail === email;
+    const phoneMatch = !!phone && xPhone === phone;
+    const zipMatch   = !!zip   && xZip === zip;
     return (emailMatch || phoneMatch) && zipMatch;
   });
-  if (hit) return hit;
+  if (hit) return { hit, basis: email ? 'email+zip' : 'phone+zip' };
 
-  // 2) Email-only or phone-only
-  hit = customers.find((x) => {
-    const xEmail = normalizeEmail(x.person.email);
-    const xPhone = normalizePhone(x.person.phone);
-    return (email && xEmail === email) || (phone && xPhone === phone);
-  });
-  if (hit) return hit;
-
-  // 3) Name + ZIP
-  if (first && last && zip) {
-    hit = customers.find((x) => {
-      const xFirst = normalizeName(x.person.first_name);
-      const xLast = normalizeName(x.person.last_name);
-      const xZip = normalizeZip(x.person.zipcode);
-      return xFirst === first && xLast === last && xZip === zip;
-    });
+  // 2) email-only
+  if (email) {
+    hit = customers.find((x) => normalizeEmail(x.person.email) === email);
+    if (hit) return { hit, basis: 'email' };
   }
 
-  return hit || null;
+  // 3) phone-only
+  if (phone) {
+    hit = customers.find((x) => normalizePhone(x.person.phone) === phone);
+    if (hit) return { hit, basis: 'phone' };
+  }
+
+  // 4) name + zip
+  if (first && last && zip) {
+    hit = customers.find((x) =>
+      normalizeName(x.person.first_name) === first &&
+      normalizeName(x.person.last_name)  === last  &&
+      normalizeZip(x.person.zipcode)     === zip
+    );
+    if (hit) return { hit, basis: 'name+zip' };
+  }
+
+  return { hit: null, basis: 'none' };
 }
 
 // --- OAuth: Authorization Code (simulated consent) ---
@@ -155,44 +146,69 @@ app.post('/quotes', auth, async (c) => {
     return c.json({ error: 'invalid_json' }, 400);
   }
 
-  const p = req?.person ?? {};
-  const providedDrivers = req?.drivers ?? [];
-  const providedVehicles = req?.vehicles ?? [];
+  // Tolerate multiple input shapes / aliases
+  const rawPerson = req?.person ?? {};
+  const top = req || {};
+  const legacyQ1 = ('' + (top.q1 ?? '')).trim(); // sometimes email
+  const legacyQ2 = ('' + (top.q2 ?? '')).trim(); // sometimes zip/postal
+
+  const emailCandidate =
+    rawPerson.email ?? top.email ?? top.user_email ?? (legacyQ1.includes('@') ? legacyQ1 : undefined);
+
+  const phoneCandidate = rawPerson.phone ?? top.phone ?? top.user_phone;
+
+  const zipCandidate =
+    rawPerson.zipcode ?? rawPerson.zip ?? rawPerson.postal_code ?? rawPerson.post_code ??
+    top.zipcode ?? top.zip ?? top.postal_code ?? top.post_code ??
+    (/^\d{5}/.test(legacyQ2) ? legacyQ2 : undefined);
+
+  const p = {
+    ...rawPerson,
+    email: emailCandidate ?? rawPerson.email,
+    phone: phoneCandidate ?? rawPerson.phone,
+    zipcode: zipCandidate ?? rawPerson.zipcode
+  };
+
+  const providedDrivers  = Array.isArray(req?.drivers)  ? req.drivers  : [];
+  const providedVehicles = Array.isArray(req?.vehicles) ? req.vehicles : [];
   const bundle = req?.bundle ?? { homeowners_selected: false };
 
   try {
-    const matched = findCustomer(p);
+    const { hit: matched, basis } = findCustomerWithBasis(p);
 
     const person = matched ? { ...matched.person, ...p } : p;
-    const ratedDrivers =
-      matched && (!providedDrivers || providedDrivers.length === 0) ? matched.drivers : providedDrivers;
-    const ratedVehicles =
-      matched && (!providedVehicles || providedVehicles.length === 0) ? matched.vehicles : providedVehicles;
+    const ratedDrivers  = matched && (!providedDrivers?.length)  ? matched.drivers  : providedDrivers;
+    const ratedVehicles = matched && (!providedVehicles?.length) ? matched.vehicles : providedVehicles;
 
-    const breakdown = rateQuote({
-      person,
-      drivers: ratedDrivers,
-      vehicles: ratedVehicles,
-      bundle
-    });
+    // Require at least one vehicle either provided or from prefill
+    if (!ratedVehicles || ratedVehicles.length === 0) {
+      return c.json({
+        error: 'insufficient_data',
+        message: 'Need at least one vehicle (year/make/model/primary_use/garaging_zip) or a matching customer with saved vehicles.'
+      }, 400);
+    }
+
+    const breakdown = rateQuote({ person, drivers: ratedDrivers, vehicles: ratedVehicles, bundle });
 
     const quote_id = uuidv4();
     const resp = {
-  quote_id,
-  rated_person: person,
-  rated_drivers: ratedDrivers,
-  rated_vehicles: ratedVehicles,
-  discounts_applied: breakdown.discounts_applied,
-  premium_breakdown: {
-    per_vehicle: breakdown.per_vehicle,
-    policy_fee: breakdown.policy_fee,
-    state_surcharge: breakdown.state_surcharge,
-    final_6mo: breakdown.final_6mo,
-    final_12mo: breakdown.final_12mo
-  },
-  created_at: new Date().toISOString(),
-  next_steps: "Review coverages and bind. A licensed agent will contact you to finalize."
-};
+      quote_id,
+      prefill: { matched: !!matched, basis, customer_id: matched?.customer_id ?? null },
+      rated_person: person,
+      rated_drivers: ratedDrivers,
+      rated_vehicles: ratedVehicles,
+      discounts_applied: breakdown.discounts_applied,
+      premium_breakdown: {
+        per_vehicle: breakdown.per_vehicle,
+        policy_fee: breakdown.policy_fee,
+        state_surcharge: breakdown.state_surcharge,
+        final_6mo: breakdown.final_6mo,
+        final_12mo: breakdown.final_12mo
+      },
+      created_at: new Date().toISOString(),
+      next_steps: "Review coverages and bind. A licensed agent will contact you to finalize."
+    };
+
     quotesStore[quote_id] = resp;
     return c.json(resp);
   } catch (e: any) {
@@ -219,7 +235,6 @@ app.get('/customers/:id', auth, (c) => {
 
 // --- Serve OpenAPI + Plugin manifest ---
 const OPENAPI_YAML = await (async () => {
-  // bundled at build; for simplicity we inline fallback below via /openapi.yaml file content
   return null;
 })();
 

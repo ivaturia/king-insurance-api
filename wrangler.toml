@@ -2,3 +2,7 @@ name = "king-insurance-api"
 main = "src/index.ts"
 compatibility_date = "2024-11-12"
 workers_dev = true
+
+[[kv_namespaces]]
+binding = "QUOTES_KV"
+id = "eb69cd5d1bcf445191b3cb0f21062b9a"   # after wrangler kv:namespace create
